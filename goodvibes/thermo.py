@@ -782,8 +782,6 @@ class calc_bbe:
         
         # Skip the calculation if unable to parse the frequencies or zpe from the output file
         if hasattr(self, "zero_point_corr") and rotemp:
-            print(f'ZPE: {self.zero_point_corr} Hartree')
-            print(f'Rotational constants: {rotemp}')
             cutoffs = [s_freq_cutoff for freq in frequency_wn]
 
             # Translational and electronic contributions to the energy and entropy do not depend on frequencies
