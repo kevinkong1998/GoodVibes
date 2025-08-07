@@ -709,7 +709,6 @@ class calc_bbe:
                 # Look for thermal corrections, paying attention to point group symmetry
                 elif line.strip().startswith('Zero point energy'):
                     self.zero_point_corr = float(line.strip().split()[4]) # in AU
-                    print(f'ZPE: {self.zero_point_corr} Hartree')
                 # Grab Multiplicity
                 elif 'Multiplicity' in line.strip():
                     try:
