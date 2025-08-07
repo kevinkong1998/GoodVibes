@@ -720,17 +720,25 @@ class calc_bbe:
                 # Grab rational symmetry number
                 elif line.strip().find('Symmetry Number') != -1:
                     if not ssymm:
-                        symmno = int(line.strip().split()[-1][:])
+                        symmno = int(line.strip().split()[-1])
                 # Grab point group
                 elif line.strip().find('Point Group:') != -1:
                     if line.strip().split()[2] == 'D*H,' or line.strip().split()[2] == 'C*V,':
                         linear_mol = 1
                 # Grab rotational constants (convert cm-1 to GHz)
                 elif line.strip().find('Rotational constants in cm-1') != -1:
-                    self.roconst = [float(line.strip().split()[4]),
+                    roconst = [float(line.strip().split()[4]),
                             float(line.strip().split()[5]),
                             float(line.strip().split()[6])]
+                    # drop zero modes and where they are the same values
+                    self.roconst = [ x for x in roconst if x != 0.0 ] # remove zero modes since these imply linearity and need to not be zero for the calc_rotational_entropy
+                    
+                    # if the values are the same, then drop one, this is taken care of by the symmetry number
+                    if len(self.roconst) > 1 and self.roconst[0] == self.roconst[1]:
+                        self.roconst.pop(1)
 
+                    if len(self.roconst) < 3:
+                        linear_mol = True
                     # ORCA we have to calculate the rotational temperatures ourselves
                     # rotemp = hc [rocont] / kB 
                     self.rotemp = [ PLANCK_CONSTANT * SPEED_OF_LIGHT * x / BOLTZMANN_CONSTANT for x in self.roconst]
