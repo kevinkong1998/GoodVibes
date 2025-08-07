@@ -666,10 +666,11 @@ class calc_bbe:
             for line in g_output[start_line:end_line]:
                 if 'cm**-1' in line:
                     vib = float(line.split()[1])
-                    if vib != 0.00:    # orca prints zero modes so these are not needed 
-                        all_freqs.append(vib)
+                    # if vib != 0.00:    # orca prints zero modes so these are not needed 
+                    all_freqs.append(vib)
 
-            most_low_freq = min(all_freqs) # get lowest mode
+            if len(all_freqs) != 0:
+                most_low_freq = min(all_freqs) # get lowest mode
             im_frequency_wn = []
             inverted_freqs = []
             for x in all_freqs:
@@ -708,6 +709,7 @@ class calc_bbe:
                 # Look for thermal corrections, paying attention to point group symmetry
                 elif line.strip().startswith('Zero point energy'):
                     self.zero_point_corr = float(line.strip().split()[4]) # in AU
+                    print(f'ZPE: {self.zero_point_corr} Hartree')
                 # Grab Multiplicity
                 elif 'Multiplicity' in line.strip():
                     try:
@@ -730,15 +732,16 @@ class calc_bbe:
                     roconst = [float(line.strip().split()[4]),
                             float(line.strip().split()[5]),
                             float(line.strip().split()[6])]
-                    # drop zero modes and where they are the same values
-                    self.roconst = [ x for x in roconst if x != 0.0 ] # remove zero modes since these imply linearity and need to not be zero for the calc_rotational_entropy
+                    # retain ONE 0 mode if all are zero
+                    if roconst == [0.0, 0.0, 0.0]:
+                        self.roconst = [0.0]
+                    else:
+                        self.roconst = [ x for x in roconst if x != 0.0 ] # remove zero modes since these imply linearity and need to not be zero for the calc_rotational_entropy
                     
                     # if the values are the same, then drop one, this is taken care of by the symmetry number
                     if len(self.roconst) > 1 and self.roconst[0] == self.roconst[1]:
                         self.roconst.pop(1)
 
-                    if len(self.roconst) < 3:
-                        linear_mol = True
                     # ORCA we have to calculate the rotational temperatures ourselves
                     # rotemp = hc [rocont] / kB 
                     self.rotemp = [ PLANCK_CONSTANT * SPEED_OF_LIGHT * x / BOLTZMANN_CONSTANT for x in self.roconst]
@@ -779,6 +782,8 @@ class calc_bbe:
         
         # Skip the calculation if unable to parse the frequencies or zpe from the output file
         if hasattr(self, "zero_point_corr") and rotemp:
+            print(f'ZPE: {self.zero_point_corr} Hartree')
+            print(f'Rotational constants: {rotemp}')
             cutoffs = [s_freq_cutoff for freq in frequency_wn]
 
             # Translational and electronic contributions to the energy and entropy do not depend on frequencies
