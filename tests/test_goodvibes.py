@@ -6,6 +6,7 @@ import math
 from goodvibes import GoodVibes as GV
 from conftest import datapath
 from goodvibes.media import solvents
+from goodvibes.vib_scale_factors import scaling_data, scaling_refs
 
 @pytest.mark.parametrize("path, QS, temp, E, ZPE, H, TS, TqhS, G, qhG", [
     # Grimme, 298.15K
@@ -346,4 +347,8 @@ def test_pes(E, ZPE, H, TS, TqhS, GT, qhGT):
             assert  GT[j] == round(formatted_list[5], precision)
             assert  qhGT[j] == round(formatted_list[6], precision)
     log.finalize()
-    
+
+
+def test_scaling_refs_indices_valid():
+    refs = list(scaling_data['zpe_ref']) + list(scaling_data['harm_ref']) + list(scaling_data['fund_ref'])
+    assert max(refs, default=-1) < len(scaling_refs)
