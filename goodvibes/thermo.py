@@ -728,25 +728,26 @@ class calc_bbe:
                         linear_mol = 1
                 # Grab rotational constants (convert cm-1 to GHz)
                 elif line.strip().find('Rotational constants in cm-1') != -1:
-                    roconst = [float(line.strip().split()[4]),
-                            float(line.strip().split()[5]),
-                            float(line.strip().split()[6])]
+                    base_roconst = [float(line.strip().split()[4]),
+                                    float(line.strip().split()[5]),
+                                    float(line.strip().split()[6])]
                     # retain ONE 0 mode if all are zero
-                    if roconst == [0.0, 0.0, 0.0]:
+                    if base_roconst == [0.0, 0.0, 0.0]:
                         self.roconst = [0.0]
                     else:
-                        self.roconst = [ x for x in roconst if x != 0.0 ] # remove zero modes since these imply linearity and need to not be zero for the calc_rotational_entropy
-                    
+                        # remove zero modes since these imply linearity and need to not be zero for the calc_rotational_entropy
+                        self.roconst = [x for x in base_roconst if x != 0.0]
+
                     # if the values are the same, then drop one, this is taken care of by the symmetry number
                     if len(self.roconst) > 1 and self.roconst[0] == self.roconst[1]:
                         self.roconst.pop(1)
 
                     # ORCA we have to calculate the rotational temperatures ourselves
                     # rotemp = hc [rocont] / kB 
-                    self.rotemp = [ PLANCK_CONSTANT * SPEED_OF_LIGHT * x / BOLTZMANN_CONSTANT for x in self.roconst]
+                    self.rotemp = [PLANCK_CONSTANT * SPEED_OF_LIGHT * x / BOLTZMANN_CONSTANT for x in self.roconst]
                     rotemp = self.rotemp
                     # convert roconst to GHz
-                    self.roconst = [ x * 29.9792458 for x in self.roconst ] # convert to GHz
+                    self.roconst = [x * 29.9792458 for x in self.roconst]  # convert to GHz
 
                 if "TOTAL RUN TIME" in line.strip():
                     days = int(line.split()[3]) 
