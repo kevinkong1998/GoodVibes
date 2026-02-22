@@ -650,6 +650,118 @@ class calc_bbe:
                     msecs = 0
                     self.cpu = [days,hours,mins,secs,msecs]
 
+        if self.sp_program == 'Orca' or self.program == 'Orca':
+            import cclib  # could parse the frequencies with cclib 
+            orcaparse = cclib.parser.ORCA(file)
+            orcadata = orcaparse.parse()
+            #all_freqs = orcadata.vibfreqs.tolist()
+
+            # scan and parse all frequencies without using cclib
+            all_freqs = []
+            for i,line in enumerate(g_output):
+                if line.strip().startswith('VIBRATIONAL FREQUENCIES'):
+                    start_line = i
+                elif line.strip().startswith('NORMAL MODES'):
+                    end_line = i
+            for line in g_output[start_line:end_line]:
+                if 'cm**-1' in line:
+                    vib = float(line.split()[1])
+                    # We intentionally keep all ORCA-reported vibrational frequencies,
+                    # including any zero or near-zero modes. In this section of the
+                    # output ORCA already excludes translational and rotational modes,
+                    # so an extra "vib != 0.00" filter here would drop legitimate
+                    # very-low-frequency vibrations and could distort the subsequent
+                    # analysis (e.g. identification of the lowest mode and TS checks).
+                    all_freqs.append(vib)
+
+            if len(all_freqs) != 0:
+                most_low_freq = min(all_freqs) # get lowest mode
+            im_frequency_wn = []
+            inverted_freqs = []
+            for x in all_freqs:
+                if x > 0.00:
+                    frequency_wn.append(x)
+                elif x < -1 * im_freq_cutoff:
+                    if invert is not False:
+                        if invert == 'auto':
+                            if 'optts' in orcadata.metadata['keywords'].lower():
+                                if x == most_low_freq:
+                                    im_frequency_wn.append(x)
+                                    im_freq = [ x ] 
+                                else:
+                                    frequency_wn.append(x * -1.)
+                                    inverted_freqs.append(x)
+                            else:
+                                frequency_wn.append(x * -1.)
+                                inverted_freqs.append(x)
+                        elif x > float(invert):
+                            frequency_wn.append(x * -1.)
+                            inverted_freqs.append(x)
+                        else:
+                            im_frequency_wn.append(x)
+                    else:
+                        im_frequency_wn.append(x)
+
+            self.inverted_freqs = inverted_freqs
+            self.frequency_wn = frequency_wn
+            self.im_freq = im_frequency_wn
+            self.im_frequency_wn = im_frequency_wn
+
+            for i,line in enumerate(g_output):
+                # For QM calculations look for SCF energies, last one will be the optimized energy
+                if line.strip().find('FINAL SINGLE POINT ENERGY') != -1:
+                    self.scf_energy = float(line.strip().split()[4])
+                # Look for thermal corrections, paying attention to point group symmetry
+                elif line.strip().startswith('Zero point energy'):
+                    self.zero_point_corr = float(line.strip().split()[4]) # in AU
+                # Grab Multiplicity
+                elif 'Multiplicity' in line.strip():
+                    try:
+                        self.mult = int(line.split()[-1])
+                    except:
+                        self.mult = 1 # defaulting multiplicity to 1
+                # Grab molecular mass
+                elif line.strip().find('Total Mass') != -1:
+                    molecular_mass = float(line.strip().split()[3])
+                # Grab rational symmetry number
+                elif line.strip().find('Symmetry Number') != -1:
+                    if not ssymm:
+                        symmno = int(line.strip().split()[-1])
+                # Grab point group
+                elif line.strip().find('Point Group:') != -1:
+                    if line.strip().split()[2] == 'D*H,' or line.strip().split()[2] == 'C*V,':
+                        linear_mol = 1
+                # Grab rotational constants (convert cm-1 to GHz)
+                elif line.strip().find('Rotational constants in cm-1') != -1:
+                    base_roconst = [float(line.strip().split()[4]),
+                                    float(line.strip().split()[5]),
+                                    float(line.strip().split()[6])]
+                    # retain ONE 0 mode if all are zero
+                    if base_roconst == [0.0, 0.0, 0.0]:
+                        self.roconst = [0.0]
+                    else:
+                        # remove zero modes since these imply linearity and need to not be zero for the calc_rotational_entropy
+                        self.roconst = [x for x in base_roconst if x != 0.0]
+
+                    # if the values are the same, then drop one, this is taken care of by the symmetry number
+                    if len(self.roconst) > 1 and self.roconst[0] == self.roconst[1]:
+                        self.roconst.pop(1)
+
+                    # ORCA we have to calculate the rotational temperatures ourselves
+                    # rotemp = hc [rocont] / kB 
+                    self.rotemp = [PLANCK_CONSTANT * SPEED_OF_LIGHT * x / BOLTZMANN_CONSTANT for x in self.roconst]
+                    rotemp = self.rotemp
+                    # convert roconst to GHz
+                    self.roconst = [x * 29.9792458 for x in self.roconst]  # convert to GHz
+
+                if "TOTAL RUN TIME" in line.strip():
+                    days = int(line.split()[3]) 
+                    hours = int(line.split()[5])
+                    mins = int(line.split()[7]) 
+                    secs = int(line.split()[9]) 
+                    msecs = int(line.split()[11])
+                    self.cpu = [days, hours, mins, secs, msecs]
+
         self.inverted_freqs = inverted_freqs
 
         if glowfreq != '':
