@@ -666,7 +666,12 @@ class calc_bbe:
             for line in g_output[start_line:end_line]:
                 if 'cm**-1' in line:
                     vib = float(line.split()[1])
-                    # if vib != 0.00:    # orca prints zero modes so these are not needed 
+                    # We intentionally keep all ORCA-reported vibrational frequencies,
+                    # including any zero or near-zero modes. In this section of the
+                    # output ORCA already excludes translational and rotational modes,
+                    # so an extra "vib != 0.00" filter here would drop legitimate
+                    # very-low-frequency vibrations and could distort the subsequent
+                    # analysis (e.g. identification of the lowest mode and TS checks).
                     all_freqs.append(vib)
 
             if len(all_freqs) != 0:
