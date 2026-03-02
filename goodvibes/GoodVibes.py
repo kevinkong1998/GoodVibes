@@ -54,6 +54,7 @@ from __future__ import print_function, absolute_import
 
 import math, os.path, sys, time
 import multiprocessing
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from glob import glob
 from argparse import ArgumentParser
@@ -347,7 +348,7 @@ def get_boltz(files, thermo_data, clustering, clusters, temperature, dup_list):
     return boltz_facs, weighted_free_energy, boltz_sum
 
 
-def check_dup(files, thermo_data):
+def check_dup(files, thermo_data, njobs=1):
     """
     Check for duplicate species from among all files based on energy, rotational constants and frequencies.
 
@@ -403,24 +404,43 @@ def check_dup(files, thermo_data):
             freq_diff = np.abs(freq_i - freq_j)
             mae_freq_diff = np.mean(freq_diff)
             max_freq_diff = np.max(freq_diff)
-
+https://github.com/kevinkong1998/GoodVibes/pull/3
         return mae_freq_diff < mae_freq_cutoff and max_freq_diff < max_freq_cutoff
 
-    for i in range(len(with_energy)):
+    def compare_with_energy_index(i):
+        local_matches = []
         for j in range(i - 1, -1, -1):
             if with_energy[i][1] - with_energy[j][1] >= e_cutoff:
                 break
             if is_duplicate(with_energy[i], with_energy[j]):
-                dup_list.append([with_energy[i][0], with_energy[j][0]])
+                local_matches.append([with_energy[i][0], with_energy[j][0]])
+        return local_matches
 
-    # Fallback: if one or both structures have no SCF energy, compare directly.
-    for i in range(len(without_energy)):
+    def compare_without_energy_index(i):
+        local_matches = []
         for with_item in with_energy:
             if is_duplicate(without_energy[i], with_item):
-                dup_list.append([without_energy[i][0], with_item[0]])
+                local_matches.append([without_energy[i][0], with_item[0]])
         for j in range(0, i):
             if is_duplicate(without_energy[i], without_energy[j]):
-                dup_list.append([without_energy[i][0], without_energy[j][0]])
+                local_matches.append([without_energy[i][0], without_energy[j][0]])
+        return local_matches
+
+    # Parallelize duplicate comparisons when requested (threads avoid pickling overhead).
+    if njobs > 1 and (len(with_energy) + len(without_energy)) > 25:
+        max_workers = min(njobs, max(1, len(with_energy) + len(without_energy)))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            for matches in executor.map(compare_with_energy_index, range(len(with_energy))):
+                dup_list.extend(matches)
+            for matches in executor.map(compare_without_energy_index, range(len(without_energy))):
+                dup_list.extend(matches)
+    else:
+        for i in range(len(with_energy)):
+            dup_list.extend(compare_with_energy_index(i))
+
+        # Fallback: if one or both structures have no SCF energy, compare directly.
+        for i in range(len(without_energy)):
+            dup_list.extend(compare_without_energy_index(i))
 
     return dup_list
 
@@ -511,7 +531,7 @@ def check_files(log, files, thermo_data, options, STARS, l_o_t, solvation_model,
         print_check_fails(log, charge_check, file_check, "charge and multiplicity", multiplicity_check)
 
     # Check for duplicate structures
-    dup_list = check_dup(files, thermo_data)
+    dup_list = check_dup(files, thermo_data, options.njob)
     if len(dup_list) == 0:
         log.write("\no  No duplicates or enantiomers found")
     else:
@@ -1169,7 +1189,7 @@ def main():
 
         # Look for duplicates or enantiomers
         if options.duplicate:
-            dup_list = check_dup(files, thermo_data)
+            dup_list = check_dup(files, thermo_data, options.njob)
         else:
             dup_list = []
 
