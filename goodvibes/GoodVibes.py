@@ -54,6 +54,7 @@ from __future__ import print_function, absolute_import
 
 import math, os.path, sys, time
 import multiprocessing
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from glob import glob
 from argparse import ArgumentParser
@@ -347,9 +348,9 @@ def get_boltz(files, thermo_data, clustering, clusters, temperature, dup_list):
     return boltz_facs, weighted_free_energy, boltz_sum
 
 
-def check_dup(files, thermo_data):
+def check_dup(files, thermo_data, njobs=1):
     """
-    Check for duplicate species from among all files based on energy, rotational constants and frequencies
+    Check for duplicate species from among all files based on energy, rotational constants and frequencies.
 
     Energy cutoff = 1 microHartree
     RMS Rotational Constant cutoff = 1kHz
@@ -359,25 +360,88 @@ def check_dup(files, thermo_data):
     ro_cutoff = 0.1
     mae_freq_cutoff = 10
     max_freq_cutoff = 10
+
+    prepared = []
+    for file in files:
+        bbe = thermo_data[file]
+        scf_energy = getattr(bbe, "scf_energy", None)
+        roconst = getattr(bbe, "roconst", None)
+        if roconst is not None:
+            roconst = np.array(roconst)
+        frequency_wn = getattr(bbe, "frequency_wn", None)
+        if frequency_wn is not None:
+            frequency_wn = np.array(frequency_wn)
+        prepared.append((file, scf_energy, roconst, frequency_wn))
+
+    # Compare lowest-cost candidates first: sorted energies allow early break on the cutoff.
+    with_energy = [item for item in prepared if item[1] is not None]
+    without_energy = [item for item in prepared if item[1] is None]
+    with_energy.sort(key=lambda item: item[1])
+
     dup_list = []
-    freq_diff, mae_freq_diff, max_freq_diff, e_diff, ro_diff = 100, 3, 10, 1, 1
-    for i, file in enumerate(files):
+
+    def is_duplicate(item_i, item_j):
+        _, energy_i, ro_i, freq_i = item_i
+        _, energy_j, ro_j, freq_j = item_j
+
+        if energy_i is not None and energy_j is not None:
+            if abs(energy_i - energy_j) >= e_cutoff:
+                return False
+
+        if ro_i is None or ro_j is None or len(ro_i) != len(ro_j):
+            return False
+        ro_diff = np.linalg.norm(ro_i - ro_j)
+        if ro_diff >= ro_cutoff:
+            return False
+
+        if freq_i is None or freq_j is None:
+            return False
+        if len(freq_i) != len(freq_j):
+            return False
+        if len(freq_i) == 0:
+            mae_freq_diff, max_freq_diff = 0.0, 0.0
+        else:
+            freq_diff = np.abs(freq_i - freq_j)
+            mae_freq_diff = np.mean(freq_diff)
+            max_freq_diff = np.max(freq_diff)
+
+        return mae_freq_diff < mae_freq_cutoff and max_freq_diff < max_freq_cutoff
+
+    def compare_with_energy_index(i):
+        local_matches = []
+        for j in range(i - 1, -1, -1):
+            if with_energy[i][1] - with_energy[j][1] >= e_cutoff:
+                break
+            if is_duplicate(with_energy[i], with_energy[j]):
+                local_matches.append([with_energy[i][0], with_energy[j][0]])
+        return local_matches
+
+    def compare_without_energy_index(i):
+        local_matches = []
+        for with_item in with_energy:
+            if is_duplicate(without_energy[i], with_item):
+                local_matches.append([without_energy[i][0], with_item[0]])
         for j in range(0, i):
-            bbe_i, bbe_j = thermo_data[files[i]], thermo_data[files[j]]
-            if hasattr(bbe_i, "scf_energy") and hasattr(bbe_j, "scf_energy"):
-                e_diff = bbe_i.scf_energy - bbe_j.scf_energy
-            if hasattr(bbe_i, "roconst") and hasattr(bbe_j, "roconst"):
-                if len(bbe_i.roconst) == len(bbe_j.roconst):
-                    ro_diff = np.linalg.norm(np.array(bbe_i.roconst) - np.array(bbe_j.roconst))
-            if hasattr(bbe_i, "frequency_wn") and hasattr(bbe_j, "frequency_wn"):
-                if len(bbe_i.frequency_wn) == len(bbe_j.frequency_wn) and len(bbe_i.frequency_wn) > 0:
-                    freq_diff = [np.linalg.norm(freqi - freqj) for freqi, freqj in
-                                 zip(bbe_i.frequency_wn, bbe_j.frequency_wn)]
-                    mae_freq_diff, max_freq_diff = np.mean(freq_diff), np.max(freq_diff)
-                elif len(bbe_i.frequency_wn) == len(bbe_j.frequency_wn) and len(bbe_i.frequency_wn) == 0:
-                    mae_freq_diff, max_freq_diff = 0., 0.
-            if e_diff < e_cutoff and ro_diff < ro_cutoff and mae_freq_diff < mae_freq_cutoff and max_freq_diff < max_freq_cutoff:
-                dup_list.append([files[i], files[j]])
+            if is_duplicate(without_energy[i], without_energy[j]):
+                local_matches.append([without_energy[i][0], without_energy[j][0]])
+        return local_matches
+
+    # Parallelize duplicate comparisons when requested (threads avoid pickling overhead).
+    if njobs > 1 and (len(with_energy) + len(without_energy)) > 25:
+        max_workers = min(njobs, max(1, len(with_energy) + len(without_energy)))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            for matches in executor.map(compare_with_energy_index, range(len(with_energy))):
+                dup_list.extend(matches)
+            for matches in executor.map(compare_without_energy_index, range(len(without_energy))):
+                dup_list.extend(matches)
+    else:
+        for i in range(len(with_energy)):
+            dup_list.extend(compare_with_energy_index(i))
+
+        # Fallback: if one or both structures have no SCF energy, compare directly.
+        for i in range(len(without_energy)):
+            dup_list.extend(compare_without_energy_index(i))
+
     return dup_list
 
 
@@ -467,7 +531,7 @@ def check_files(log, files, thermo_data, options, STARS, l_o_t, solvation_model,
         print_check_fails(log, charge_check, file_check, "charge and multiplicity", multiplicity_check)
 
     # Check for duplicate structures
-    dup_list = check_dup(files, thermo_data)
+    dup_list = check_dup(files, thermo_data, options.njob)
     if len(dup_list) == 0:
         log.write("\no  No duplicates or enantiomers found")
     else:
@@ -1125,7 +1189,7 @@ def main():
 
         # Look for duplicates or enantiomers
         if options.duplicate:
-            dup_list = check_dup(files, thermo_data)
+            dup_list = check_dup(files, thermo_data, options.njob)
         else:
             dup_list = []
 
