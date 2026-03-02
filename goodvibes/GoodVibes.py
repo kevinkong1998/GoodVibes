@@ -404,7 +404,7 @@ def check_dup(files, thermo_data, njobs=1):
             freq_diff = np.abs(freq_i - freq_j)
             mae_freq_diff = np.mean(freq_diff)
             max_freq_diff = np.max(freq_diff)
-
+https://github.com/kevinkong1998/GoodVibes/pull/3
         return mae_freq_diff < mae_freq_cutoff and max_freq_diff < max_freq_cutoff
 
     def compare_with_energy_index(i):
